@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Enquiries — Admin</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #08080A; color: #F4F3EF; padding: 32px 20px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: #9C9CA4; font-size: 13px; margin: 0 0 24px; }
+  .token-bar { display: flex; gap: 8px; margin-bottom: 24px; max-width: 520px; }
+  input, select, button {
+    background: #111114; border: 1px solid #242429; color: #F4F3EF;
+    border-radius: 8px; padding: 8px 12px; font-size: 13px;
+  }
+  input { flex: 1; }
+  button { cursor: pointer; background: #F4F3EF; color: #08080A; border: none; font-weight: 600; }
+  button:hover { opacity: 0.85; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #242429; vertical-align: top; }
+  th { color: #6A6A72; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+  .msg { color: #9C9CA4; max-width: 320px; white-space: pre-wrap; }
+  .status-NEW { color: #FFB238; }
+  .status-CONTACTED { color: #8FB0FF; }
+  .status-IN_DISCUSSION { color: #4D7FFF; }
+  .status-COMPLETED { color: #9C9CA4; }
+  .empty { color: #6A6A72; padding: 40px 0; text-align: center; }
+  .error { color: #FFB238; margin-top: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Portfolio Enquiries</h1>
+  <p class="sub">Paste your ADMIN_TOKEN (from server/.env) to load enquiries. Update status inline as you follow up.</p>
+
+  <div class="token-bar">
+    <input id="token" type="password" placeholder="Admin token" />
+    <input id="apiUrl" type="text" placeholder="API URL" value="http://localhost:5000" />
+    <button onclick="load()">Load</button>
+  </div>
+  <div id="error" class="error"></div>
+  <div id="content"></div>
+
+<script>
+const STATUSES = ['NEW', 'CONTACTED', 'IN_DISCUSSION', 'COMPLETED'];
+
+async function load() {
+  const token = document.getElementById('token').value.trim();
+  const apiUrl = document.getElementById('apiUrl').value.trim().replace(/\/$/, '');
+  const errorEl = document.getElementById('error');
+  const contentEl = document.getElementById('content');
+  errorEl.textContent = '';
+  if (!token) { errorEl.textContent = 'Enter your admin token first.'; return; }
+
+  localStorage.setItem('enquiry_admin_token', token);
+  localStorage.setItem('enquiry_admin_api', apiUrl);
+
+  try {
+    const res = await fetch(`${apiUrl}/api/admin/enquiries`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load enquiries.');
+    render(data.enquiries, apiUrl, token);
+  } catch (err) {
+    errorEl.textContent = err.message;
+    contentEl.innerHTML = '';
+  }
+}
+
+function render(enquiries, apiUrl, token) {
+  const contentEl = document.getElementById('content');
+  if (!enquiries.length) {
+    contentEl.innerHTML = '<div class="empty">No enquiries yet.</div>';
+    return;
+  }
+
+  const rows = enquiries.map((e) => `
+    <tr data-id="${e.id}">
+      <td>${new Date(e.createdAt).toLocaleString()}</td>
+      <td>${escapeHtml(e.fullName)}<br/><span style="color:#6A6A72">${escapeHtml(e.email)}</span></td>
+      <td>${escapeHtml(e.enquiryType)}</td>
+      <td>${escapeHtml(e.subject)}<div class="msg">${escapeHtml(e.message)}</div></td>
+      <td>${escapeHtml(e.preferredContact)}${e.phone ? `<br/><span style="color:#6A6A72">${escapeHtml(e.phone)}</span>` : ''}</td>
+      <td>
+        <select onchange="updateStatus('${e.id}', this.value, '${apiUrl}', '${token}')" class="status-${e.status}">
+          ${STATUSES.map((s) => `<option value="${s}" ${s === e.status ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}
+        </select>
+      </td>
+    </tr>
+  `).join('');
+
+  contentEl.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>Received</th><th>Contact</th><th>Type</th><th>Subject / Message</th><th>Preferred</th><th>Status</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+async function updateStatus(id, status, apiUrl, token) {
+  try {
+    const res = await fetch(`${apiUrl}/api/admin/enquiries/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to update status.');
+  } catch (err) {
+    document.getElementById('error').textContent = err.message;
+  }
+}
+
+function escapeHtml(str = '') {
+  return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Restore last-used token/API URL for convenience
+window.addEventListener('DOMContentLoaded', () => {
+  const savedToken = localStorage.getItem('enquiry_admin_token');
+  const savedApi = localStorage.getItem('enquiry_admin_api');
+  if (savedToken) document.getElementById('token').value = savedToken;
+  if (savedApi) document.getElementById('apiUrl').value = savedApi;
+});
+</script>
+</body>
+</html>
